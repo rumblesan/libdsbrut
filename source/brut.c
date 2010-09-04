@@ -34,6 +34,8 @@ uint16 analog_read(uint8 pin)
 		msg[2] = 4;
 	} else if (pin == PC3) {
 		msg[2] = 3;
+	} else {
+		msg[2] = pin;
 	}
 	
 	// we wait for an irq after the 3rd byte (when the adc occurs)
@@ -42,6 +44,44 @@ uint16 analog_read(uint8 pin)
 	uart_wait_prio(2);
 	
 	return (msg[3]<<8)|msg[4];
+}
+
+
+void analog_read_fast(bool start, uint8 pin)
+{
+	// todo: needs more testing
+	uint8 msg[] = { '\\', 'f', 0x00 };
+	uint16 i;
+	
+	if (!start)
+		msg[1] = 'F';			// stop command
+	
+	// fix pin mapping
+	if (pin == PC5) {
+		msg[2] = 5;
+	} else if (pin == PC4) {
+		msg[2] = 4;
+	} else if (pin == PC3) {
+		msg[2] = 3;
+	} else {
+		msg[2] = pin;
+	}
+	
+	if (start) {
+		// flush output buffer first
+		uart_flush();
+		uart_write_prio(msg, 3, NULL, 0x00);
+		uart_wait_prio(2);
+		// drain the remaining in-queue with dummy reads
+		while((i = uart_read(NULL, 128)));		
+		// this would be the place to adjust the spi rate
+	} else {
+		uart_write_prio(msg, 2, NULL, 0x00);
+		uart_wait_prio(2);
+		// drain the remaining in-queue with dummy reads
+		while((i = uart_read(NULL, 128)));
+		// this would be the place to adjust the spi rate again
+	}
 }
 
 
@@ -193,4 +233,53 @@ uint8 i2c_send(uint8 addr, const uint8* src, uint8 size)
 	ret = msg[4+size];
 	free(msg);
 	return ret;			// return result
+}
+
+
+void servo_detach(uint8 pin)
+{
+	uint8 msg[] = { '\\', 's', 0x00 };
+	
+	msg[2] = pin;
+	uart_write_prio(msg, 3, NULL, 0);
+	uart_wait_prio(0);
+}
+
+
+bool servo_set(uint8 pin, uint8 pos)
+{
+	uint8 msg[] = { '\\', 'S', 0x00, 0x00, 0x00 };
+	
+	msg[2] = pin;
+	msg[3] = pos;
+	// last byte is for return value
+	uart_write_prio(msg, 5, msg, 0x00);
+	uart_wait_prio(0);
+	
+	if (msg[4]) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+
+bool em4102_send(uint8 pin, const uint8* data, uint8 tries)
+{
+	uint8 msg[] = { '\\', 'E', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	
+	msg[2] = pin;
+	msg[3] = tries;
+	msg[4] = data[0];
+	msg[5] = data[1];
+	msg[6] = data[2];
+	msg[7] = data[3];
+	msg[8] = data[4];
+	
+	// we wait for an irq on the final byte (when the transmission occurs)
+	uart_write_prio(msg, 10, NULL, 0x01);
+	if (uart_wait_prio(5))
+		return true;
+	else
+		return false;
 }
